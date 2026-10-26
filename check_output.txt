@@ -1,0 +1,16 @@
+$ cargo fmt --check
+sh: 1: cargo: not found
+EXIT_STATUS=127
+
+$ cargo clippy --all-targets --all-features -- -D warnings
+sh: 1: cargo: not found
+EXIT_STATUS=127
+
+$ cargo test
+sh: 1: cargo: not found
+EXIT_STATUS=127
+
+$ cargo test --release
+sh: 1: cargo: not found
+EXIT_STATUS=127
+

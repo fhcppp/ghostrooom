@@ -1,0 +1,22 @@
+[package]
+name = "ghostroom-core"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Synchronous room lifecycle, invitations, and room-scoped capabilities"
+readme = "README.md"
+
+[workspace]
+members = ["server"]
+default-members = [".", "server"]
+resolver = "2"
+
+[lib]
+name = "ghostroom_core"
+path = "src/lib.rs"
+
+[dependencies]
+getrandom = "0.3"
+sha2 = "0.10"
+subtle = "2"
+zeroize = "1"
