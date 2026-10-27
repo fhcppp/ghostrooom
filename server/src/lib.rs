@@ -1,6 +1,8 @@
 //! Loopback-only GhostRoom control-plane API (no messaging or E2EE).
 #![forbid(unsafe_code)]
 
+pub mod transport;
+
 use axum::{
     body::{Body, Bytes},
     extract::{

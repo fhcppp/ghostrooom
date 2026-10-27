@@ -1,7 +1,11 @@
 //! GhostRoom HTTP control plane: loopback-only, no message transfer.
 use ghostroom_core::{CleanupStats, ManagerError, RoomManager, RoomManagerConfig};
-use ghostroom_server::{router, validate_listener, ServerLimits};
-use std::{env, error::Error, future::IntoFuture, net::SocketAddr, sync::Arc, time::Duration};
+use ghostroom_server::{
+    router,
+    transport::{self, TransportLimits},
+    validate_listener, ServerLimits,
+};
+use std::{env, error::Error, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     sync::{oneshot, watch},
     time,
@@ -52,6 +56,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let creates = config_number("GHOSTROOM_CREATES_PER_MINUTE", 30, 600)?;
     let mutations = config_number("GHOSTROOM_MUTATIONS_PER_MINUTE", 120, 600)?;
     let cleanup_per_pass = config_number("GHOSTROOM_CLEANUP_BUDGET", 16, 4096)?;
+    let transport = TransportLimits {
+        max_connections: config_number("GHOSTROOM_MAX_CONNECTIONS", 64, 4096)?,
+        header_timeout: Duration::from_millis(
+            config_number("GHOSTROOM_HEADER_TIMEOUT_MS", 5000, 30000)? as u64,
+        ),
+        max_connection_age: Duration::from_secs(
+            config_number("GHOSTROOM_MAX_CONNECTION_AGE_S", 60, 3600)? as u64,
+        ),
+        max_header_bytes: config_number("GHOSTROOM_MAX_HEADER_BYTES", 8192, 32768)?,
+        max_headers: config_number("GHOSTROOM_MAX_HEADERS", 64, 100)?,
+    }
+    .validate()?;
     let manager = Arc::new(RoomManager::new(RoomManagerConfig {
         max_rooms,
         max_waiting_lifetime: Duration::from_secs(600),
@@ -109,29 +125,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let fatal = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let fatal_in_signal = std::sync::Arc::clone(&fatal);
-    let (drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();
-    let result = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                _ = signal => {},
-                _ = &mut fatal_rx => { fatal_in_signal.store(true, std::sync::atomic::Ordering::SeqCst); },
-            }
-            let _ = drain_tx.send(());
-        });
-    let result = result.into_future();
-    tokio::pin!(result);
-    // Only start the grace timer after a shutdown condition, not at startup.
-    let served = tokio::select! {
-        result = &mut result => Ok(result),
-        _ = drain_rx => time::timeout(Duration::from_secs(10), &mut result).await
-            .map_err(|_| "server shutdown grace deadline exceeded"),
-    };
+    let served = transport::serve(listener, app, transport, async move {
+        tokio::select! {
+            _ = signal => {},
+            _ = &mut fatal_rx => {
+                fatal_in_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
+        }
+    })
+    .await;
     let _ = shutdown_tx.send(true);
     let maintenance = maint.await;
     if fatal.load(std::sync::atomic::Ordering::SeqCst) || maintenance.is_err() {
         return Err("unrecoverable room maintenance failure".into());
     }
-    served??;
+    served?;
     Ok(())
 }
 
