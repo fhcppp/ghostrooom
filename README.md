@@ -123,3 +123,35 @@ The server is still **loopback-only HTTP**, with no Tor or TLS, E2EE,
 persistent state, messaging, per-client identity, production readiness
 or complete socket-level DoS resistance. No performance/load benchmark
 or penetration test was conducted.
+
+## Backend v0.2 TCP/HTTP transport limits (development only)
+
+The HTTP/1 listener now enforces connection admission **before** socket
+acceptance and parsing, rather than relying on application middleware.
+When the connection limit is reached, the accept loop pauses and the
+operating system's finite listen backlog provides backpressure. Hyper
+limits header read time (including incomplete and trickled headers),
+header bytes/count, and idle keep-alive header waits. A separate absolute
+connection-age deadline terminates even an active keep-alive peer.
+
+| Environment variable | Default | Valid range |
+|---|---:|---:|
+| `GHOSTROOM_MAX_CONNECTIONS` | 64 | 1–4096 |
+| `GHOSTROOM_HEADER_TIMEOUT_MS` | 5000 | 100–30000 |
+| `GHOSTROOM_MAX_CONNECTION_AGE_S` | 60 | 2–3600; must be >= header timeout |
+| `GHOSTROOM_MAX_HEADER_BYTES` | 8192 | 8192–32768 |
+| `GHOSTROOM_MAX_HEADERS` | 64 | 1–100 |
+
+The transport allows up to ten seconds to drain on SIGINT, SIGTERM or
+fatal maintenance failure before aborting remaining connection workers.
+Existing body limits, request timeouts, authentication, concealment,
+rate limits, no-store responses and loopback-only binding are preserved.
+
+Hyper 1.12.0/Hyper-Util 0.1.21 were already present in the lockfile; this
+step uses them directly and does not update their versions. The header
+count setting can incur a small allocation per request. No comparable
+load, throughput, memory or benchmark measurements are available.
+The kernel's finite backlog/FD limits and OS-level local-process abuse
+remain outside the in-process cap. Never expose this HTTP listener
+publicly. Tor, messaging and E2EE are still absent; **ADR 0002 remains
+NO-GO / BLOCKED**. See `docs/TRANSPORT_V0_2.md` for test caveats.
